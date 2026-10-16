@@ -1,0 +1,91 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidUser(data) {
+      return data.id is string &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 80 &&
+             (!('email' in data) || data.email is string) &&
+             (!('phone' in data) || data.phone is string) &&
+             (!('avatarColorHex' in data) || data.avatarColorHex is string) &&
+             (!('upiId' in data) || data.upiId is string) &&
+             (!('notifEnabled' in data) || data.notifEnabled is bool) &&
+             (!('createdAt' in data) || data.createdAt is number);
+    }
+
+    function isValidRoom(data) {
+      return data.id is string &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.inviteCode is string && data.inviteCode.size() >= 4 && data.inviteCode.size() <= 10 &&
+             data.createdBy is string &&
+             (!('emoji' in data) || data.emoji is string) &&
+             (!('createdAt' in data) || data.createdAt is number);
+    }
+
+    function isValidMember(data) {
+      return data.id is string &&
+             data.roomId is string &&
+             data.userId is string &&
+             data.name is string && data.name.size() > 0 &&
+             (!('avatarColorHex' in data) || data.avatarColorHex is string) &&
+             (!('upiId' in data) || data.upiId is string) &&
+             (!('isActive' in data) || data.isActive is bool) &&
+             (!('joinedAt' in data) || data.joinedAt is number);
+    }
+
+    function isValidEntry(data) {
+      return data.id is string &&
+             data.roomId is string &&
+             data.memberId is string &&
+             data.itemName is string && data.itemName.size() > 0 && data.itemName.size() <= 200 &&
+             data.category is string &&
+             data.amount is number && data.amount > 0 &&
+             data.date is string &&
+             (!('note' in data) || data.note is string) &&
+             (!('memberName' in data) || data.memberName is string) &&
+             (!('memberAvatarColorHex' in data) || data.memberAvatarColorHex is string) &&
+             (!('createdAt' in data) || data.createdAt is number);
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isOwner(userId) && isValidUser(request.resource.data);
+      allow delete: if isOwner(userId);
+    }
+
+    // Rooms collection
+    match /rooms/{roomId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidRoom(request.resource.data);
+      allow update: if isAuthenticated() && isValidRoom(request.resource.data);
+      allow delete: if isAuthenticated() && resource.data.createdBy == request.auth.uid;
+
+      // Subcollection: Members
+      match /members/{memberId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAuthenticated() && isValidMember(request.resource.data);
+        allow delete: if isAuthenticated();
+      }
+
+      // Subcollection: Entries
+      match /entries/{entryId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated() && isValidEntry(request.resource.data);
+        allow update: if isAuthenticated() && isValidEntry(request.resource.data);
+        allow delete: if isAuthenticated();
+      }
+    }
+  }
+}

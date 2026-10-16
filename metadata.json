@@ -1,0 +1,6 @@
+{
+  "name": "RoomSplit",
+  "description": "Shared-expense tracker for flat & PG roommates with quick 10-second entry logging, real-time balances, UPI settlements, and monthly summaries.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

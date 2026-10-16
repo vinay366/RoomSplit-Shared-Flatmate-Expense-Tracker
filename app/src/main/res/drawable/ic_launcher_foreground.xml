@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Centered within 66dp safe zone (x: 21..87, y: 21..87) -->
+    <!-- House roof outline -->
+    <path
+        android:fillColor="#34D399"
+        android:pathData="M54,26 L79,47 L73,52 L54,36 L35,52 L29,47 Z" />
+    
+    <!-- Split receipt card left -->
+    <path
+        android:fillColor="#F8FAFC"
+        android:pathData="M35,46 L51,46 L51,80 L47,77 L43,80 L39,77 L35,80 Z" />
+        
+    <!-- Split receipt card right -->
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M57,46 L73,46 L73,80 L69,77 L65,80 L61,77 L57,80 Z" />
+        
+    <!-- Horizontal balance cuts / currency notches -->
+    <path
+        android:fillColor="#0F172A"
+        android:pathData="M39,54 L47,54 L47,57 L39,57 Z" />
+    <path
+        android:fillColor="#0F172A"
+        android:pathData="M39,61 L45,61 L45,64 L39,64 Z" />
+    <path
+        android:fillColor="#0F172A"
+        android:pathData="M61,54 L69,54 L69,57 L61,57 Z" />
+    <path
+        android:fillColor="#0F172A"
+        android:pathData="M61,61 L67,61 L67,64 L61,64 Z" />
+</vector>
