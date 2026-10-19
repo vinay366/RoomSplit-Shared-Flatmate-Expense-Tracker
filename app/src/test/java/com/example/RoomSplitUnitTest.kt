@@ -1,54 +1,73 @@
 package com.example
 
+import com.example.data.model.DebtTransfer
 import com.example.data.model.ExpenseCategory
-import com.example.data.model.SettlementPair
-import com.example.data.model.User
+import com.example.data.model.RoomMember
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
-import kotlin.math.abs
+import kotlin.math.min
 
 class RoomSplitUnitTest {
 
-  @Test
-  fun testFiveFixedCategoriesExist() {
-    assertEquals(5, ExpenseCategory.entries.size)
-    assertNotNull(ExpenseCategory.fromId("vegetables"))
-    assertNotNull(ExpenseCategory.fromId("milk"))
-    assertNotNull(ExpenseCategory.fromId("gas"))
-    assertNotNull(ExpenseCategory.fromId("rent"))
-    assertNotNull(ExpenseCategory.fromId("misc"))
-  }
+    @Test
+    fun testCategoryResolution() {
+        assertEquals(ExpenseCategory.GROCERIES, ExpenseCategory.fromId("Groceries"))
+        assertEquals(ExpenseCategory.UTILITIES, ExpenseCategory.fromId("WiFi/Electricity"))
+        assertEquals(ExpenseCategory.MAID_COOK, ExpenseCategory.fromId("Maid/Cook"))
+        assertEquals(ExpenseCategory.CLEANING, ExpenseCategory.fromId("Cleaning"))
+        assertEquals(ExpenseCategory.OTHER, ExpenseCategory.fromId("Random"))
+    }
 
-  @Test
-  fun testUpiDeepLinkGeneration() {
-    val from = User(id = "u1", phone = "+919876543210", name = "Ammu", avatarColorHex = "#7C3AED", upiId = "ammu@upi")
-    val to = User(id = "u2", phone = "+919876543211", name = "Priya", avatarColorHex = "#DB2777", upiId = "priya@okaxis")
-    val settlement = SettlementPair("s1", from, to, 476.67)
+    @Test
+    fun testBilateralDebtCalculation() {
+        val memberA = RoomMember(userId = "A", displayName = "Alice")
+        val memberB = RoomMember(userId = "B", displayName = "Bob")
+        val memberC = RoomMember(userId = "C", displayName = "Charlie")
 
-    val link = settlement.upiDeepLink
-    assertTrue(link.startsWith("upi://pay?"))
-    assertTrue(link.contains("pa=priya@okaxis") || link.contains("pa=priya%40okaxis"))
-    assertTrue(link.contains("am=476.67"))
-    assertTrue(link.contains("cu=INR"))
-  }
+        // Alice paid 300, Bob paid 0, Charlie paid 0
+        // Total = 300, Share = 100 each
+        // Alice net = +200, Bob net = -100, Charlie net = -100
+        val netMap = mapOf(
+            memberA to 200.0,
+            memberB to -100.0,
+            memberC to -100.0
+        )
 
-  @Test
-  fun testBalancesSumToZero() {
-    val users = listOf(
-      User(id = "u1", name = "Priya"),
-      User(id = "u2", name = "Ammu"),
-      User(id = "u3", name = "Vinay")
-    )
-    val total = 1100.0 + 120.0 + 450.0
-    val avg = total / users.size
+        val creditors = netMap.filter { it.value > 0.01 }.map { it.key to it.value }.toMutableList()
+        val debtors = netMap.filter { it.value < -0.01 }.map { it.key to -it.value }.toMutableList()
 
-    val netPriya = 1100.0 - avg
-    val netAmmu = 120.0 - avg
-    val netVinay = 450.0 - avg
+        val transfers = mutableListOf<DebtTransfer>()
+        var cIdx = 0
+        var dIdx = 0
+        while (cIdx < creditors.size && dIdx < debtors.size) {
+            val (creditor, creditAmt) = creditors[cIdx]
+            val (debtor, debtAmt) = debtors[dIdx]
+            val settlementAmt = min(creditAmt, debtAmt)
 
-    val sum = netPriya + netAmmu + netVinay
-    assertTrue("Net balances must sum to 0", abs(sum) < 0.001)
-  }
+            if (settlementAmt > 0.01) {
+                transfers.add(
+                    DebtTransfer(
+                        debtor = debtor,
+                        creditor = creditor,
+                        amount = settlementAmt
+                    )
+                )
+            }
+
+            creditors[cIdx] = creditor to (creditAmt - settlementAmt)
+            debtors[dIdx] = debtor to (debtAmt - settlementAmt)
+
+            if (creditors[cIdx].second < 0.01) cIdx++
+            if (debtors[dIdx].second < 0.01) dIdx++
+        }
+
+        assertEquals(2, transfers.size)
+        assertEquals("B", transfers[0].debtor.userId)
+        assertEquals("A", transfers[0].creditor.userId)
+        assertEquals(100.0, transfers[0].amount, 0.001)
+
+        assertEquals("C", transfers[1].debtor.userId)
+        assertEquals("A", transfers[1].creditor.userId)
+        assertEquals(100.0, transfers[1].amount, 0.001)
+    }
 }

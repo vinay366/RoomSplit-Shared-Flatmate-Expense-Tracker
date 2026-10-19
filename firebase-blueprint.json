@@ -1,86 +1,55 @@
 {
   "entities": {
-    "User": {
-      "title": "User",
-      "description": "User profile containing identity, name, phone, and upi details",
-      "type": "object",
-      "properties": {
+    "users": {
+      "path": "users/{userId}",
+      "fields": {
         "id": { "type": "string" },
-        "name": { "type": "string" },
-        "phone": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "activeRoomId": { "type": "string", "optional": true },
         "avatarColorHex": { "type": "string" },
-        "upiId": { "type": "string" },
-        "notifEnabled": { "type": "boolean" },
-        "createdAt": { "type": "string", "format": "date-time" }
-      },
-      "required": ["id", "name"]
+        "upiId": { "type": "string", "optional": true },
+        "createdAt": { "type": "number" }
+      }
     },
-    "Room": {
-      "title": "Room",
-      "description": "Shared flat or PG room with unique invite code",
-      "type": "object",
-      "properties": {
+    "rooms": {
+      "path": "rooms/{roomId}",
+      "fields": {
         "id": { "type": "string" },
         "name": { "type": "string" },
         "inviteCode": { "type": "string" },
-        "emoji": { "type": "string" },
         "createdBy": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "createdAt": { "type": "number" }
       },
-      "required": ["id", "name", "inviteCode", "createdBy"]
-    },
-    "Membership": {
-      "title": "Membership",
-      "description": "Room member representation",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "roomId": { "type": "string" },
-        "userId": { "type": "string" },
-        "name": { "type": "string" },
-        "avatarColorHex": { "type": "string" },
-        "upiId": { "type": "string" },
-        "joinedAt": { "type": "string", "format": "date-time" },
-        "isActive": { "type": "boolean" }
-      },
-      "required": ["id", "roomId", "userId", "name"]
-    },
-    "Entry": {
-      "title": "Entry",
-      "description": "Daily shared expense contribution",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "roomId": { "type": "string" },
-        "memberId": { "type": "string" },
-        "memberName": { "type": "string" },
-        "memberAvatarColorHex": { "type": "string" },
-        "itemName": { "type": "string" },
-        "category": { "type": "string" },
-        "amount": { "type": "number" },
-        "date": { "type": "string" },
-        "note": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" }
-      },
-      "required": ["id", "roomId", "memberId", "itemName", "category", "amount", "date"]
-    }
-  },
-  "firestore": {
-    "/users/{userId}": {
-      "schema": "User",
-      "description": "Stores user profiles"
-    },
-    "/rooms/{roomId}": {
-      "schema": "Room",
-      "description": "Stores room entities"
-    },
-    "/rooms/{roomId}/members/{memberId}": {
-      "schema": "Membership",
-      "description": "Stores room flatmate memberships"
-    },
-    "/rooms/{roomId}/entries/{entryId}": {
-      "schema": "Entry",
-      "description": "Stores room shared expense entries"
+      "subcollections": {
+        "members": {
+          "path": "rooms/{roomId}/members/{memberId}",
+          "fields": {
+            "userId": { "type": "string" },
+            "displayName": { "type": "string" },
+            "avatarColorHex": { "type": "string" },
+            "upiId": { "type": "string", "optional": true },
+            "joinedAt": { "type": "number" }
+          }
+        },
+        "entries": {
+          "path": "rooms/{roomId}/entries/{entryId}",
+          "fields": {
+            "id": { "type": "string" },
+            "amount": { "type": "number" },
+            "category": { "type": "string" },
+            "itemName": { "type": "string" },
+            "paidByMemberId": { "type": "string" },
+            "paidByMemberName": { "type": "string" },
+            "paidByMemberAvatarColorHex": { "type": "string" },
+            "date": { "type": "string" },
+            "note": { "type": "string", "optional": true },
+            "isSettlement": { "type": "boolean", "optional": true },
+            "settlementReceiverId": { "type": "string", "optional": true },
+            "createdAt": { "type": "number" }
+          }
+        }
+      }
     }
   }
 }

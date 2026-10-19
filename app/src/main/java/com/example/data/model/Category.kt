@@ -1,69 +1,55 @@
 package com.example.data.model
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.ElectricBolt
+import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.ui.graphics.Color
-import com.example.ui.theme.CategoryGas
-import com.example.ui.theme.CategoryGasBg
-import com.example.ui.theme.CategoryMilk
-import com.example.ui.theme.CategoryMilkBg
-import com.example.ui.theme.CategoryMisc
-import com.example.ui.theme.CategoryMiscBg
-import com.example.ui.theme.CategoryRent
-import com.example.ui.theme.CategoryRentBg
-import com.example.ui.theme.CategoryVegetables
-import com.example.ui.theme.CategoryVegetablesBg
+import androidx.compose.ui.graphics.vector.ImageVector
 
 enum class ExpenseCategory(
-  val id: String,
-  val displayName: String,
-  val emoji: String,
-  val color: Color,
-  val bgColor: Color,
-  val sampleSuggestions: List<String>
+    val id: String,
+    val displayName: String,
+    val icon: ImageVector,
+    val color: Color
 ) {
-  VEGETABLES(
-    id = "vegetables",
-    displayName = "Vegetables",
-    emoji = "🥦",
-    color = CategoryVegetables,
-    bgColor = CategoryVegetablesBg,
-    sampleSuggestions = listOf("Tomatoes & Onions", "Potatoes & Chillies", "Fresh Coriander & Mint", "Sabzi Mandi basket")
-  ),
-  MILK(
-    id = "milk",
-    displayName = "Milk",
-    emoji = "🥛",
-    color = CategoryMilk,
-    bgColor = CategoryMilkBg,
-    sampleSuggestions = listOf("Amul Gold 1L", "Mother Dairy 2L", "Curd & Paneer", "Oat Milk carton")
-  ),
-  GAS(
-    id = "gas",
-    displayName = "Gas",
-    emoji = "🔥",
-    color = CategoryGas,
-    bgColor = CategoryGasBg,
-    sampleSuggestions = listOf("Indane cylinder refill", "HP Gas booking", "Piped gas bill", "Lighter & regulator")
-  ),
-  RENT(
-    id = "rent",
-    displayName = "Rent",
-    emoji = "🏠",
-    color = CategoryRent,
-    bgColor = CategoryRentBg,
-    sampleSuggestions = listOf("Monthly Flat Rent", "Maintenance & Society charges", "Security advance", "Parking slot")
-  ),
-  MISC(
-    id = "misc",
-    displayName = "Misc",
-    emoji = "🛒",
-    color = CategoryMisc,
-    bgColor = CategoryMiscBg,
-    sampleSuggestions = listOf("Wi-Fi broadband bill", "House cleaning & Maid", "Garbage disposal", "Spices, Oil & Atta")
-  );
+    GROCERIES(
+        id = "Groceries",
+        displayName = "Groceries",
+        icon = Icons.Default.ShoppingCart,
+        color = Color(0xFF10B981) // Emerald Green
+    ),
+    UTILITIES(
+        id = "WiFi/Electricity",
+        displayName = "WiFi / Power",
+        icon = Icons.Default.ElectricBolt,
+        color = Color(0xFFF59E0B) // Amber
+    ),
+    MAID_COOK(
+        id = "Maid/Cook",
+        displayName = "Maid / Cook",
+        icon = Icons.Default.Person,
+        color = Color(0xFF8B5CF6) // Purple
+    ),
+    CLEANING(
+        id = "Cleaning",
+        displayName = "Cleaning Supplies",
+        icon = Icons.Default.CleaningServices,
+        color = Color(0xFF06B6D4) // Cyan
+    ),
+    OTHER(
+        id = "Other",
+        displayName = "Other Essentials",
+        icon = Icons.Default.Inventory2,
+        color = Color(0xFF64748B) // Slate
+    );
 
-  companion object {
-    fun fromId(id: String): ExpenseCategory {
-      return entries.firstOrNull { it.id.equals(id, ignoreCase = true) } ?: MISC
+    companion object {
+        fun fromId(id: String?): ExpenseCategory {
+            return entries.firstOrNull { it.id.equals(id, ignoreCase = true) || it.name.equals(id, ignoreCase = true) }
+                ?: OTHER
+        }
     }
-  }
 }

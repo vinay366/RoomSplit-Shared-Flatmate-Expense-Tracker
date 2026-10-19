@@ -8,22 +8,20 @@ const fs = require("node:fs");
 
 let testEnv;
 const PROJECT_ID = "demo-no-project";
-const ALICE_UID = "alice_uid_123";
-const BOB_UID = "bob_uid_456";
-
-const [emulatorHost, emulatorPortStr] = (process.env.FIRESTORE_EMULATOR_HOST || "127.0.0.1:8085").split(":");
-const emulatorPort = parseInt(emulatorPortStr, 10);
 
 before(async () => {
-  const rules = fs.readFileSync("./firestore.rules", "utf8");
   testEnv = await initializeTestEnvironment({
     projectId: PROJECT_ID,
     firestore: {
-      rules,
-      host: emulatorHost,
-      port: emulatorPort,
+      rules: fs.readFileSync("firestore.rules", "utf8"),
+      host: "127.0.0.1",
+      port: 8085,
     },
   });
+});
+
+beforeEach(async () => {
+  await testEnv.clearFirestore();
 });
 
 after(async () => {
@@ -32,90 +30,85 @@ after(async () => {
   }
 });
 
-beforeEach(async () => {
-  if (testEnv) {
-    await testEnv.clearFirestore();
-  }
-});
-
-test("Unauthenticated user: cannot read users, rooms", async () => {
+test("unauthenticated users cannot read or write anything", async () => {
   const unauthDb = testEnv.unauthenticatedContext().firestore();
-  await assertFails(unauthDb.collection("users").doc(ALICE_UID).get());
-  await assertFails(unauthDb.collection("rooms").doc("room_1").get());
-});
-
-test("Authenticated user: can create and update own profile", async () => {
-  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
-  await assertSucceeds(
-    aliceDb.collection("users").doc(ALICE_UID).set({
-      id: ALICE_UID,
-      name: "Alice",
-      avatarColorHex: "#059669",
-      upiId: "alice@upi"
-    })
-  );
-
-  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
-  // Bob cannot overwrite Alice's profile
+  await assertFails(unauthDb.collection("users").doc("alice").get());
   await assertFails(
-    bobDb.collection("users").doc(ALICE_UID).set({
-      id: ALICE_UID,
-      name: "Bob Impersonator"
+    unauthDb.collection("users").doc("alice").set({
+      id: "alice",
+      displayName: "Alice",
+      email: "alice@example.com",
+    })
+  );
+  await assertFails(unauthDb.collection("rooms").doc("room1").get());
+});
+
+test("authenticated user can create own profile and read profiles", async () => {
+  const aliceDb = testEnv.authenticatedContext("alice").firestore();
+  await assertSucceeds(
+    aliceDb.collection("users").doc("alice").set({
+      id: "alice",
+      displayName: "Alice Smith",
+      email: "alice@example.com",
+      avatarColorHex: "#10B981",
+      createdAt: Date.now(),
+    })
+  );
+
+  const bobDb = testEnv.authenticatedContext("bob").firestore();
+  await assertSucceeds(bobDb.collection("users").doc("alice").get());
+  await assertFails(
+    bobDb.collection("users").doc("alice").set({
+      id: "alice",
+      displayName: "Mallory",
+      email: "mal@example.com",
     })
   );
 });
 
-test("Authenticated user: can create room and add entry", async () => {
-  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
-  const roomId = "room_123";
-
+test("authenticated user can create room and add entries", async () => {
+  const aliceDb = testEnv.authenticatedContext("alice").firestore();
   await assertSucceeds(
-    aliceDb.collection("rooms").doc(roomId).set({
-      id: roomId,
-      name: "Flat 4B",
+    aliceDb.collection("rooms").doc("room1").set({
+      id: "room1",
+      name: "Apartment 4B",
       inviteCode: "FLAT4B",
-      createdBy: ALICE_UID,
-      emoji: "🏠"
+      createdBy: "alice",
+      createdAt: Date.now(),
     })
   );
 
   await assertSucceeds(
-    aliceDb.collection("rooms").doc(roomId).collection("members").doc(ALICE_UID).set({
-      id: ALICE_UID,
-      roomId: roomId,
-      userId: ALICE_UID,
-      name: "Alice",
-      avatarColorHex: "#059669",
-      isActive: true
+    aliceDb.collection("rooms").doc("room1").collection("members").doc("alice").set({
+      userId: "alice",
+      displayName: "Alice",
+      avatarColorHex: "#10B981",
+      joinedAt: Date.now(),
     })
   );
 
   await assertSucceeds(
-    aliceDb.collection("rooms").doc(roomId).collection("entries").doc("entry_1").set({
-      id: "entry_1",
-      roomId: roomId,
-      memberId: ALICE_UID,
-      memberName: "Alice",
-      itemName: "Tomatoes",
-      category: "vegetables",
-      amount: 120.0,
-      date: "2026-10-15"
+    aliceDb.collection("rooms").doc("room1").collection("entries").doc("entry1").set({
+      id: "entry1",
+      amount: 450,
+      category: "Groceries",
+      itemName: "Milk, Bread & Veggies",
+      paidByMemberId: "alice",
+      paidByMemberName: "Alice",
+      date: "2026-10-18",
+      createdAt: Date.now(),
     })
   );
-});
 
-test("Entry creation fails with negative or 0 amount", async () => {
-  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
-  const roomId = "room_123";
+  // Invalid entry: negative amount must fail
   await assertFails(
-    aliceDb.collection("rooms").doc(roomId).collection("entries").doc("bad_entry").set({
-      id: "bad_entry",
-      roomId: roomId,
-      memberId: ALICE_UID,
-      itemName: "Tomatoes",
-      category: "vegetables",
-      amount: -50.0,
-      date: "2026-10-15"
+    aliceDb.collection("rooms").doc("room1").collection("entries").doc("entry2").set({
+      id: "entry2",
+      amount: -50,
+      category: "Groceries",
+      itemName: "Bad Entry",
+      paidByMemberId: "alice",
+      date: "2026-10-18",
     })
   );
 });

@@ -1,8 +1,9 @@
 package com.example.ui.screens
 
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,33 +17,43 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.GroupAdd
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.ReceiptLong
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.ElectricBolt
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.MeetingRoom
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Surface
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,323 +62,426 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.example.data.model.EntryWithMember
+import com.example.data.model.Entry
 import com.example.data.model.ExpenseCategory
 import com.example.data.model.Room
-import com.example.data.model.User
+import com.example.data.model.RoomMember
+import com.example.data.model.UserProfile
+import com.example.ui.components.AddEntryBottomSheet
 import com.example.ui.components.EntryCard
-import com.example.ui.theme.EmeraldPrimary
+import com.example.ui.components.RoomHeader
+import kotlinx.coroutines.launch
 import java.util.Locale
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FeedScreen(
-  entries: List<EntryWithMember>,
-  currentUser: User?,
-  activeRoom: Room?,
-  searchQuery: String,
-  selectedCategory: String?,
-  onSearchChange: (String) -> Unit,
-  onCategoryFilterChange: (String?) -> Unit,
-  onDeleteEntry: (String) -> Unit,
-  onOpenAddEntry: () -> Unit,
-  onOpenCreateRoom: () -> Unit,
-  onOpenJoinRoom: () -> Unit,
-  modifier: Modifier = Modifier
+    userProfile: UserProfile,
+    room: Room?,
+    members: List<RoomMember>,
+    entries: List<Entry>,
+    recentAlertMessage: String?,
+    onAddEntry: (Entry) -> Unit,
+    onDeleteEntry: (String) -> Unit,
+    onCreateRoomClick: () -> Unit,
+    onJoinRoomClick: () -> Unit,
+    onOpenProfile: () -> Unit,
+    onOpenRoomDetails: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-  Box(modifier = modifier.fillMaxSize()) {
-    Column(modifier = Modifier.fillMaxSize()) {
-      if (activeRoom == null) {
-        // Welcome Onboarding Card
-        Box(
-          modifier = Modifier
+    var selectedCategoryFilter by remember { mutableStateOf<String?>(null) }
+    var showAddEntrySheet by remember { mutableStateOf(false) }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val coroutineScope = rememberCoroutineScope()
+
+    val filteredEntries = remember(entries, selectedCategoryFilter) {
+        if (selectedCategoryFilter == null) {
+            entries
+        } else {
+            entries.filter { it.category.equals(selectedCategoryFilter, ignoreCase = true) }
+        }
+    }
+
+    val totalMonthExpense = remember(entries) {
+        entries.filter { !it.isSettlement }.sumOf { it.amount }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text(
+                            text = "RoomSplit",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = room?.name ?: "No Room Selected",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
+                actions = {
+                    val avatarColor = try {
+                        Color(android.graphics.Color.parseColor(userProfile.avatarColorHex))
+                    } catch (e: Exception) {
+                        MaterialTheme.colorScheme.primary
+                    }
+
+                    IconButton(
+                        onClick = onOpenProfile,
+                        modifier = Modifier.testTag("user_profile_avatar_button")
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(avatarColor),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = userProfile.displayName.take(1).uppercase(),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                )
+            )
+        },
+        floatingActionButton = {
+            if (room != null) {
+                FloatingActionButton(
+                    onClick = { showAddEntrySheet = true },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = Color.White,
+                    modifier = Modifier.testTag("add_expense_fab")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Log Expense",
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
+        },
+        modifier = modifier.fillMaxSize()
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) {
+            // Simulated In-App Push Notification banner
+            AnimatedVisibility(
+                visible = !recentAlertMessage.isNullOrEmpty(),
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Notifications,
+                            contentDescription = "Notification",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = recentAlertMessage ?: "",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+
+            if (room == null) {
+                // Onboarding state: No active room
+                NoRoomState(
+                    onCreateRoom = onCreateRoomClick,
+                    onJoinRoom = onJoinRoomClick
+                )
+            } else {
+                // Room Active: Feed
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Room Card with Invite Code
+                    item {
+                        RoomHeader(
+                            room = room,
+                            members = members,
+                            onOpenDetails = onOpenRoomDetails
+                        )
+                    }
+
+                    // Month Total Summary Pill
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        text = "Total Flat Spending",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = "₹${String.format(Locale.getDefault(), "%.0f", totalMonthExpense)}",
+                                        style = MaterialTheme.typography.titleLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+
+                                Text(
+                                    text = "${entries.count { !it.isSettlement }} entries",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    // Category Filter Chips
+                    item {
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(vertical = 4.dp)
+                        ) {
+                            item {
+                                FilterChip(
+                                    selected = selectedCategoryFilter == null,
+                                    onClick = { selectedCategoryFilter = null },
+                                    label = { Text("All") },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                        selectedLabelColor = Color.White
+                                    )
+                                )
+                            }
+                            items(ExpenseCategory.entries) { category ->
+                                FilterChip(
+                                    selected = selectedCategoryFilter == category.id,
+                                    onClick = {
+                                        selectedCategoryFilter = if (selectedCategoryFilter == category.id) null else category.id
+                                    },
+                                    label = { Text(category.displayName) },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = category.icon,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = if (selectedCategoryFilter == category.id) Color.White else category.color
+                                        )
+                                    },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = category.color,
+                                        selectedLabelColor = Color.White
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    // Feed Items Header
+                    item {
+                        Text(
+                            text = "Shared Feed",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+
+                    if (filteredEntries.isEmpty()) {
+                        item {
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 24.dp),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(32.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ShoppingCart,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                        modifier = Modifier.size(48.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text(
+                                        text = "No expenses logged yet",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "Tap the + button to log groceries, maid, WiFi, or supplies in 10 seconds.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        items(filteredEntries, key = { it.id }) { entry ->
+                            val canDelete = entry.paidByMemberId == userProfile.id || room.createdBy == userProfile.id
+                            EntryCard(
+                                entry = entry,
+                                isCurrentMemberPaid = entry.paidByMemberId == userProfile.id,
+                                canDelete = canDelete,
+                                onDelete = { onDeleteEntry(entry.id) }
+                            )
+                        }
+                    }
+
+                    item {
+                        Spacer(modifier = Modifier.height(80.dp))
+                    }
+                }
+            }
+        }
+    }
+
+    if (showAddEntrySheet && room != null) {
+        AddEntryBottomSheet(
+            sheetState = sheetState,
+            members = members,
+            currentUserId = userProfile.id,
+            onDismiss = {
+                coroutineScope.launch { sheetState.hide() }.invokeOnCompletion {
+                    showAddEntrySheet = false
+                }
+            },
+            onSaveEntry = { entry ->
+                onAddEntry(entry)
+                coroutineScope.launch { sheetState.hide() }.invokeOnCompletion {
+                    showAddEntrySheet = false
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun NoRoomState(
+    onCreateRoom: () -> Unit,
+    onJoinRoom: () -> Unit
+) {
+    Column(
+        modifier = Modifier
             .fillMaxSize()
             .padding(24.dp),
-          contentAlignment = Alignment.Center
-        ) {
-          Card(
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-            modifier = Modifier.fillMaxWidth()
-          ) {
-            Column(
-              modifier = Modifier
-                .fillMaxWidth()
-                .padding(26.dp),
-              horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-              Box(
-                modifier = Modifier
-                  .size(72.dp)
-                  .clip(CircleShape)
-                  .background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center
-              ) {
-                Icon(
-                  imageVector = Icons.Default.Home,
-                  contentDescription = null,
-                  tint = EmeraldPrimary,
-                  modifier = Modifier.size(36.dp)
-                )
-              }
-
-              Spacer(modifier = Modifier.height(18.dp))
-
-              Text(
-                text = "Welcome to RoomSplit!",
-                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
-              )
-
-              Spacer(modifier = Modifier.height(8.dp))
-
-              Text(
-                text = "Shared flatmate expenses with live cloud sync. Create your flat or enter a 6-character invite code from your flatmates.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
-              )
-
-              Spacer(modifier = Modifier.height(24.dp))
-
-              Button(
-                onClick = onOpenCreateRoom,
-                colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .height(50.dp)
-                  .testTag("onboarding_create_room_button")
-              ) {
-                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Create a Flat Room", fontWeight = FontWeight.Bold)
-              }
-
-              Spacer(modifier = Modifier.height(12.dp))
-
-              OutlinedButton(
-                onClick = onOpenJoinRoom,
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .height(50.dp)
-                  .testTag("onboarding_join_room_button")
-              ) {
-                Icon(Icons.Default.GroupAdd, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Join with 6-Char Code", fontWeight = FontWeight.Bold)
-              }
-            }
-          }
-        }
-      } else {
-        // Quick Stats Ribbon: Flat Total Spend
-        val totalSpend = entries.sumOf { it.entry.amount }
-        Card(
-          shape = RoundedCornerShape(16.dp),
-          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 6.dp)
-        ) {
-          Row(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(
             modifier = Modifier
-              .fillMaxWidth()
-              .padding(horizontal = 16.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Column {
-              Text(
-                text = "Total Feed Spend",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-              )
-              Text(
-                text = String.format(Locale.US, "₹%.2f", totalSpend),
-                style = MaterialTheme.typography.titleLarge.copy(
-                  fontWeight = FontWeight.Bold,
-                  color = MaterialTheme.colorScheme.primary
-                )
-              )
-            }
-
-            Surface(
-              color = MaterialTheme.colorScheme.primaryContainer,
-              shape = RoundedCornerShape(10.dp)
-            ) {
-              Text(
-                text = "${entries.size} entries",
-                style = MaterialTheme.typography.labelMedium.copy(
-                  fontWeight = FontWeight.Bold,
-                  color = EmeraldPrimary
-                ),
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-              )
-            }
-          }
+                .size(80.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.MeetingRoom,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(40.dp)
+            )
         }
 
-        // Search Bar with Clean Elevated Surface
-        OutlinedTextField(
-          value = searchQuery,
-          onValueChange = onSearchChange,
-          placeholder = { Text("Search tomatoes, milk, Wi-Fi...") },
-          leadingIcon = {
-            Icon(
-              imageVector = Icons.Default.Search,
-              contentDescription = "Search",
-              tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-          },
-          trailingIcon = {
-            if (searchQuery.isNotEmpty()) {
-              IconButton(onClick = { onSearchChange("") }) {
-                Icon(Icons.Default.Clear, contentDescription = "Clear search")
-              }
-            }
-          },
-          singleLine = true,
-          shape = RoundedCornerShape(16.dp),
-          colors = OutlinedTextFieldDefaults.colors(
-            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-            focusedContainerColor = MaterialTheme.colorScheme.surface
-          ),
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp)
-            .testTag("feed_search_input")
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Text(
+            text = "Welcome to RoomSplit!",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
         )
 
-        // Category Filter Chips Row (All + 5 fixed categories)
-        Row(
-          modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-          horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-          FilterChip(
-            selected = selectedCategory == null,
-            onClick = { onCategoryFilterChange(null) },
-            label = { Text("All (${entries.size})") },
-            shape = RoundedCornerShape(16.dp),
-            colors = FilterChipDefaults.filterChipColors(
-              selectedContainerColor = EmeraldPrimary,
-              selectedLabelColor = Color.White
-            ),
-            modifier = Modifier.testTag("category_filter_all")
-          )
+        Spacer(modifier = Modifier.height(8.dp))
 
-          ExpenseCategory.entries.forEach { cat ->
-            val isSelected = selectedCategory.equals(cat.id, ignoreCase = true)
-            FilterChip(
-              selected = isSelected,
-              onClick = {
-                if (isSelected) onCategoryFilterChange(null)
-                else onCategoryFilterChange(cat.id)
-              },
-              label = {
-                Text("${cat.emoji} ${cat.displayName}")
-              },
-              shape = RoundedCornerShape(16.dp),
-              colors = FilterChipDefaults.filterChipColors(
-                selectedContainerColor = cat.color,
-                selectedLabelColor = Color.White
-              ),
-              modifier = Modifier.testTag("category_filter_${cat.id}")
-            )
-          }
-        }
+        Text(
+            text = "Create a room for your flat or join your roommates with an invite code.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
 
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(32.dp))
 
-        if (entries.isEmpty()) {
-          Box(
+        Button(
+            onClick = onCreateRoom,
             modifier = Modifier
-              .fillMaxSize()
-              .padding(32.dp),
-            contentAlignment = Alignment.Center
-          ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-              Box(
-                modifier = Modifier
-                  .size(76.dp)
-                  .clip(CircleShape)
-                  .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center
-              ) {
-                Icon(
-                  imageVector = Icons.Default.ReceiptLong,
-                  contentDescription = null,
-                  tint = MaterialTheme.colorScheme.primary,
-                  modifier = Modifier.size(38.dp)
-                )
-              }
-              Spacer(modifier = Modifier.height(18.dp))
-              Text(
-                text = if (searchQuery.isNotBlank() || selectedCategory != null) "No matching expenses"
-                else "No expenses in ${activeRoom.name} yet",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                textAlign = TextAlign.Center
-              )
-              Spacer(modifier = Modifier.height(8.dp))
-              Text(
-                text = "Tap '+ Add Expense' below to log your real daily vegetables, milk, gas, or flat rent in 10 seconds!",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
-              )
-            }
-          }
-        } else {
-          LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-          ) {
-            items(
-              items = entries,
-              key = { it.entry.id }
-            ) { item ->
-              val isOwn = currentUser?.id == item.member.id
-              EntryCard(
-                item = item,
-                isOwnEntry = isOwn,
-                onDelete = { onDeleteEntry(item.entry.id) }
-              )
-            }
-
-            item {
-              Spacer(modifier = Modifier.height(88.dp))
-            }
-          }
+                .fillMaxWidth()
+                .height(52.dp)
+                .testTag("create_room_entry_button"),
+            shape = RoundedCornerShape(16.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+        ) {
+            Text(
+                text = "Create New Room",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
         }
-      }
-    }
 
-    // 10-Second Add Entry FAB (only visible when in an active room)
-    if (activeRoom != null) {
-      ExtendedFloatingActionButton(
-        onClick = onOpenAddEntry,
-        icon = { Icon(Icons.Default.Add, contentDescription = null, tint = Color.White) },
-        text = {
-          Text(
-            text = "Add Expense",
-            fontWeight = FontWeight.Bold,
-            color = Color.White
-          )
-        },
-        containerColor = EmeraldPrimary,
-        shape = RoundedCornerShape(18.dp),
-        modifier = Modifier
-          .align(Alignment.BottomEnd)
-          .padding(18.dp)
-          .testTag("add_expense_fab")
-      )
+        Spacer(modifier = Modifier.height(14.dp))
+
+        OutlinedButton(
+            onClick = onJoinRoom,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .testTag("join_room_entry_button"),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Text(
+                text = "Join with Room Code",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
     }
-  }
 }

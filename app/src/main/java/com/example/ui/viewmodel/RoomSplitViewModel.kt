@@ -3,385 +3,338 @@ package com.example.ui.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.data.model.EntryWithMember
+import com.example.data.model.DebtTransfer
+import com.example.data.model.Entry
 import com.example.data.model.MemberBalance
-import com.example.data.model.MonthlySummary
 import com.example.data.model.Room
-import com.example.data.model.SettlementPair
-import com.example.data.model.User
+import com.example.data.model.RoomMember
+import com.example.data.model.UserProfile
+import com.example.data.remote.FirestoreErrorHandler
 import com.example.data.repository.RoomSplitFirestoreRepository
-import com.google.firebase.Firebase
-import com.google.firebase.auth.auth
+import com.example.ui.theme.AvatarColors
+import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.time.YearMonth
-import java.time.format.DateTimeFormatter
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
-
-enum class NavTab {
-  FEED,
-  BALANCES,
-  SUMMARY
-}
-
-data class RoomSplitUiState(
-  val currentTab: NavTab = NavTab.FEED,
-  val currentUser: User? = null,
-  val activeRoom: Room? = null,
-  val roomMembers: List<User> = emptyList(),
-  val feedEntries: List<EntryWithMember> = emptyList(),
-  val filteredEntries: List<EntryWithMember> = emptyList(),
-
-  // Month navigation
-  val selectedMonthKey: String = "",
-  val selectedMonthName: String = "",
-  val availableMonths: List<Pair<String, String>> = emptyList(),
-
-  // Balances & Settlements
-  val totalSpendForMonth: Double = 0.0,
-  val memberBalances: List<MemberBalance> = emptyList(),
-  val settlements: List<SettlementPair> = emptyList(),
-
-  // Summary
-  val monthlySummary: MonthlySummary? = null,
-
-  // Filters & Search
-  val searchQuery: String = "",
-  val selectedCategoryFilter: String? = null,
-
-  // UI Modals
-  val isAddEntrySheetOpen: Boolean = false,
-  val isRoomDetailsOpen: Boolean = false,
-  val isCreateRoomOpen: Boolean = false,
-  val isJoinRoomOpen: Boolean = false,
-  val isProfileDialogOpen: Boolean = false,
-
-  // In-app Notification Banner
-  val activeNotification: String? = null,
-
-  // Profile Edit
-  val editName: String = "",
-  val editPhone: String = "",
-  val editUpiId: String = "",
-  val editAvatarColorHex: String = "#059669"
-)
+import kotlin.math.min
 
 class RoomSplitViewModel(application: Application) : AndroidViewModel(application) {
-  private val repository = RoomSplitFirestoreRepository.getInstance(application)
+    private val repository = RoomSplitFirestoreRepository(application.applicationContext)
+    private val auth = FirebaseAuth.getInstance()
 
-  private val _uiState = MutableStateFlow(RoomSplitUiState())
-  val uiState: StateFlow<RoomSplitUiState> = _uiState.asStateFlow()
+    private val _currentUserProfile = MutableStateFlow<UserProfile?>(null)
+    val currentUserProfile: StateFlow<UserProfile?> = _currentUserProfile.asStateFlow()
 
-  private var feedJob: Job? = null
-  private var balanceJob: Job? = null
-  private var summaryJob: Job? = null
-  private var membersJob: Job? = null
-  private var roomJob: Job? = null
-  private var notifTimerJob: Job? = null
+    private val _currentRoom = MutableStateFlow<Room?>(null)
+    val currentRoom: StateFlow<Room?> = _currentRoom.asStateFlow()
 
-  init {
-    setupMonths()
-    observeState()
-  }
+    private val _members = MutableStateFlow<List<RoomMember>>(emptyList())
+    val members: StateFlow<List<RoomMember>> = _members.asStateFlow()
 
-  private fun setupMonths() {
-    val current = YearMonth.now()
-    val fmtKey = DateTimeFormatter.ofPattern("yyyy-MM")
-    val fmtName = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)
+    private val _entries = MutableStateFlow<List<Entry>>(emptyList())
+    val entries: StateFlow<List<Entry>> = _entries.asStateFlow()
 
-    val months = (0..3).map { i ->
-      val ym = current.minusMonths(i.toLong())
-      Pair(ym.format(fmtKey), ym.format(fmtName))
-    }
+    private val _balances = MutableStateFlow<List<MemberBalance>>(emptyList())
+    val balances: StateFlow<List<MemberBalance>> = _balances.asStateFlow()
 
-    _uiState.update {
-      it.copy(
-        availableMonths = months,
-        selectedMonthKey = months.first().first,
-        selectedMonthName = months.first().second
-      )
-    }
-  }
+    private val _debtTransfers = MutableStateFlow<List<DebtTransfer>>(emptyList())
+    val debtTransfers: StateFlow<List<DebtTransfer>> = _debtTransfers.asStateFlow()
 
-  private fun observeState() {
-    // 1. Current Authenticated User Profile
-    viewModelScope.launch {
-      repository.getCurrentUserFlow().collectLatest { user ->
-        _uiState.update { state ->
-          state.copy(
-            currentUser = user,
-            editName = user?.name ?: "",
-            editPhone = user?.phone ?: "",
-            editUpiId = user?.upiId ?: "",
-            editAvatarColorHex = user?.avatarColorHex ?: "#059669"
-          )
+    private val _recentAlertMessage = MutableStateFlow<String?>(null)
+    val recentAlertMessage: StateFlow<String?> = _recentAlertMessage.asStateFlow()
+
+    private val _errorMessage = MutableStateFlow<String?>(null)
+    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
+
+    private var profileJob: Job? = null
+    private var roomJob: Job? = null
+    private var membersJob: Job? = null
+    private var entriesJob: Job? = null
+
+    init {
+        auth.addAuthStateListener { firebaseAuth ->
+            val user = firebaseAuth.currentUser
+            if (user != null) {
+                initUser(user.uid, user.displayName ?: "Flatmate", user.email ?: "")
+            } else {
+                cleanupState()
+            }
         }
-      }
     }
 
-    // 2. In-app Push Notification stream
-    viewModelScope.launch {
-      repository.notificationEvents.collectLatest { msg ->
-        _uiState.update { it.copy(activeNotification = msg) }
-        if (msg != null) {
-          notifTimerJob?.cancel()
-          notifTimerJob = viewModelScope.launch {
-            delay(5000)
-            dismissNotification()
-          }
+    fun initUser(userId: String, displayName: String, email: String) {
+        profileJob?.cancel()
+        profileJob = viewModelScope.launch {
+            repository.observeUserProfile(userId).collect { profile ->
+                if (profile == null) {
+                    val newProfile = UserProfile(
+                        id = userId,
+                        displayName = displayName,
+                        email = email,
+                        avatarColorHex = AvatarColors.random(),
+                        createdAt = System.currentTimeMillis()
+                    )
+                    try {
+                        repository.saveUserProfile(newProfile)
+                        _currentUserProfile.value = newProfile
+                    } catch (e: Exception) {
+                        _errorMessage.value = FirestoreErrorHandler.handle(e, "create user profile")
+                    }
+                } else {
+                    _currentUserProfile.value = profile
+                    val roomId = profile.activeRoomId
+                    if (!roomId.isNullOrEmpty()) {
+                        observeActiveRoom(roomId)
+                    } else {
+                        clearRoomState()
+                    }
+                }
+            }
         }
-      }
     }
 
-    // 3. Active Room & Real-time Live Collections
-    viewModelScope.launch {
-      repository.activeRoomId.collectLatest { roomId ->
-        if (roomId.isNullOrBlank()) {
-          _uiState.update {
-            it.copy(
-              activeRoom = null,
-              roomMembers = emptyList(),
-              feedEntries = emptyList(),
-              filteredEntries = emptyList(),
-              totalSpendForMonth = 0.0,
-              memberBalances = emptyList(),
-              settlements = emptyList(),
-              monthlySummary = null
-            )
-          }
-          return@collectLatest
-        }
-
-        // Active room doc
+    private fun observeActiveRoom(roomId: String) {
         roomJob?.cancel()
         roomJob = viewModelScope.launch {
-          repository.getActiveRoomFlow(roomId).collectLatest { room ->
-            _uiState.update { it.copy(activeRoom = room) }
-          }
+            repository.observeRoom(roomId).collect { room ->
+                _currentRoom.value = room
+            }
         }
 
-        // Members subcollection
         membersJob?.cancel()
         membersJob = viewModelScope.launch {
-          repository.getRoomMembersFlow(roomId).collectLatest { members ->
-            _uiState.update { it.copy(roomMembers = members) }
-          }
-        }
-
-        // Feed entries subcollection
-        feedJob?.cancel()
-        feedJob = viewModelScope.launch {
-          repository.getFeedEntriesFlow(roomId).collectLatest { entries ->
-            _uiState.update { state ->
-              state.copy(
-                feedEntries = entries,
-                filteredEntries = filterEntries(entries, state.searchQuery, state.selectedCategoryFilter)
-              )
+            repository.observeRoomMembers(roomId).collect { membersList ->
+                _members.value = membersList
+                recalculateBalancesAndDebts(_entries.value, membersList)
             }
-          }
         }
 
-        // Balances & Summary
-        refreshBalances(roomId, _uiState.value.selectedMonthKey)
-        refreshSummary(roomId, _uiState.value.selectedMonthKey, _uiState.value.selectedMonthName)
-      }
-    }
-  }
+        entriesJob?.cancel()
+        entriesJob = viewModelScope.launch {
+            repository.observeRoomEntries(roomId).collect { entriesList ->
+                val prevList = _entries.value
+                _entries.value = entriesList
+                recalculateBalancesAndDebts(entriesList, _members.value)
 
-  private fun refreshBalances(roomId: String, monthKey: String) {
-    balanceJob?.cancel()
-    balanceJob = viewModelScope.launch {
-      repository.getBalancesFlow(roomId, monthKey).collectLatest { (total, balances, settlements) ->
-        _uiState.update {
-          it.copy(
-            totalSpendForMonth = total,
-            memberBalances = balances,
-            settlements = settlements
-          )
+                // Trigger in-app notification banner for new entry
+                if (prevList.isNotEmpty() && entriesList.size > prevList.size) {
+                    val newest = entriesList.firstOrNull()
+                    if (newest != null && newest.paidByMemberId != _currentUserProfile.value?.id) {
+                        _recentAlertMessage.value = "${newest.paidByMemberName} logged ₹${String.format(Locale.getDefault(), "%.0f", newest.amount)} for ${newest.itemName}"
+                        kotlinx.coroutines.delay(4000)
+                        _recentAlertMessage.value = null
+                    }
+                }
+            }
         }
-      }
     }
-  }
 
-  private fun refreshSummary(roomId: String, monthKey: String, monthName: String) {
-    summaryJob?.cancel()
-    summaryJob = viewModelScope.launch {
-      repository.getMonthlySummaryFlow(roomId, monthKey, monthName).collectLatest { summary ->
-        _uiState.update { it.copy(monthlySummary = summary) }
-      }
+    private fun recalculateBalancesAndDebts(entriesList: List<Entry>, membersList: List<RoomMember>) {
+        if (membersList.isEmpty()) {
+            _balances.value = emptyList()
+            _debtTransfers.value = emptyList()
+            return
+        }
+
+        val totalExpenses = entriesList.filter { !it.isSettlement }.sumOf { it.amount }
+        val fairShare = totalExpenses / membersList.size.toDouble()
+
+        // 1. Calculate net balance for each member
+        val paidMap = mutableMapOf<String, Double>()
+        membersList.forEach { paidMap[it.userId] = 0.0 }
+
+        entriesList.forEach { entry ->
+            if (entry.isSettlement) {
+                // Settlement: payer paid, receiver got paid
+                val currentPayer = paidMap[entry.paidByMemberId] ?: 0.0
+                paidMap[entry.paidByMemberId] = currentPayer + entry.amount
+
+                val receiverId = entry.settlementReceiverId
+                if (receiverId != null) {
+                    val currentReceiver = paidMap[receiverId] ?: 0.0
+                    paidMap[receiverId] = currentReceiver - entry.amount
+                }
+            } else {
+                val current = paidMap[entry.paidByMemberId] ?: 0.0
+                paidMap[entry.paidByMemberId] = current + entry.amount
+            }
+        }
+
+        val calculatedBalances = membersList.map { member ->
+            val paid = paidMap[member.userId] ?: 0.0
+            val net = paid - fairShare
+            MemberBalance(
+                member = member,
+                totalPaid = paid,
+                fairShare = fairShare,
+                netBalance = net
+            )
+        }
+        _balances.value = calculatedBalances
+
+        // 2. Simplified bilateral debt calculation (greedy)
+        val creditors = calculatedBalances
+            .filter { it.netBalance > 0.01 }
+            .map { it.member to it.netBalance }
+            .toMutableList()
+
+        val debtors = calculatedBalances
+            .filter { it.netBalance < -0.01 }
+            .map { it.member to -it.netBalance }
+            .toMutableList()
+
+        val transfers = mutableListOf<DebtTransfer>()
+
+        var cIdx = 0
+        var dIdx = 0
+        while (cIdx < creditors.size && dIdx < debtors.size) {
+            val (creditor, creditAmt) = creditors[cIdx]
+            val (debtor, debtAmt) = debtors[dIdx]
+            val settlementAmt = min(creditAmt, debtAmt)
+
+            if (settlementAmt > 0.01) {
+                transfers.add(
+                    DebtTransfer(
+                        debtor = debtor,
+                        creditor = creditor,
+                        amount = settlementAmt
+                    )
+                )
+            }
+
+            creditors[cIdx] = creditor to (creditAmt - settlementAmt)
+            debtors[dIdx] = debtor to (debtAmt - settlementAmt)
+
+            if (creditors[cIdx].second < 0.01) cIdx++
+            if (debtors[dIdx].second < 0.01) dIdx++
+        }
+
+        _debtTransfers.value = transfers
     }
-  }
 
-  fun selectTab(tab: NavTab) {
-    _uiState.update { it.copy(currentTab = tab) }
-  }
-
-  fun selectMonth(monthKey: String, monthName: String) {
-    _uiState.update {
-      it.copy(
-        selectedMonthKey = monthKey,
-        selectedMonthName = monthName
-      )
+    fun createRoom(name: String) {
+        val user = _currentUserProfile.value ?: return
+        viewModelScope.launch {
+            try {
+                val room = repository.createRoom(name, user)
+                observeActiveRoom(room.id)
+            } catch (e: Exception) {
+                _errorMessage.value = FirestoreErrorHandler.handle(e, "create room")
+            }
+        }
     }
-    val roomId = _uiState.value.activeRoom?.id ?: return
-    refreshBalances(roomId, monthKey)
-    refreshSummary(roomId, monthKey, monthName)
-  }
 
-  fun setSearchQuery(query: String) {
-    _uiState.update { state ->
-      state.copy(
-        searchQuery = query,
-        filteredEntries = filterEntries(state.feedEntries, query, state.selectedCategoryFilter)
-      )
+    fun joinRoom(inviteCode: String) {
+        val user = _currentUserProfile.value ?: return
+        viewModelScope.launch {
+            try {
+                val room = repository.joinRoomByInviteCode(inviteCode, user)
+                observeActiveRoom(room.id)
+            } catch (e: Exception) {
+                _errorMessage.value = FirestoreErrorHandler.handle(e, "join room")
+            }
+        }
     }
-  }
 
-  fun setCategoryFilter(categoryId: String?) {
-    _uiState.update { state ->
-      state.copy(
-        selectedCategoryFilter = categoryId,
-        filteredEntries = filterEntries(state.feedEntries, state.searchQuery, categoryId)
-      )
+    fun addEntry(entry: Entry) {
+        val room = _currentRoom.value ?: return
+        viewModelScope.launch {
+            try {
+                repository.addEntry(room.id, entry)
+            } catch (e: Exception) {
+                _errorMessage.value = FirestoreErrorHandler.handle(e, "log expense")
+            }
+        }
     }
-  }
 
-  private fun filterEntries(
-    entries: List<EntryWithMember>,
-    query: String,
-    category: String?
-  ): List<EntryWithMember> {
-    return entries.filter { item ->
-      val matchesQuery = query.isBlank() ||
-        item.entry.itemName.contains(query, ignoreCase = true) ||
-        item.member.name.contains(query, ignoreCase = true) ||
-        item.entry.note.contains(query, ignoreCase = true)
-
-      val matchesCat = category == null || item.entry.category.equals(category, ignoreCase = true)
-
-      matchesQuery && matchesCat
+    fun deleteEntry(entryId: String) {
+        val room = _currentRoom.value ?: return
+        viewModelScope.launch {
+            try {
+                repository.deleteEntry(room.id, entryId)
+            } catch (e: Exception) {
+                _errorMessage.value = FirestoreErrorHandler.handle(e, "delete expense")
+            }
+        }
     }
-  }
 
-  // Add Entry to live cloud Firestore
-  fun openAddEntry() { _uiState.update { it.copy(isAddEntrySheetOpen = true) } }
-  fun closeAddEntry() { _uiState.update { it.copy(isAddEntrySheetOpen = false) } }
-
-  fun addEntry(
-    itemName: String,
-    category: String,
-    amount: Double,
-    date: String,
-    note: String = "",
-    paidBy: User
-  ) {
-    val roomId = _uiState.value.activeRoom?.id ?: return
-    viewModelScope.launch {
-      try {
-        repository.addEntry(
-          roomId = roomId,
-          itemName = itemName,
-          category = category,
-          amount = amount,
-          date = date,
-          note = note,
-          paidBy = paidBy
-        )
-        closeAddEntry()
-      } catch (e: Exception) {
-        _uiState.update { it.copy(activeNotification = "Failed to add entry: ${e.message}") }
-      }
+    fun recordSettlement(debt: DebtTransfer) {
+        val room = _currentRoom.value ?: return
+        viewModelScope.launch {
+            try {
+                val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+                val settlementEntry = Entry(
+                    amount = debt.amount,
+                    category = "Settlement",
+                    itemName = "Settlement: ${debt.debtor.displayName} → ${debt.creditor.displayName}",
+                    paidByMemberId = debt.debtor.userId,
+                    paidByMemberName = debt.debtor.displayName,
+                    paidByMemberAvatarColorHex = debt.debtor.avatarColorHex,
+                    date = todayStr,
+                    note = "Direct UPI settlement",
+                    isSettlement = true,
+                    settlementReceiverId = debt.creditor.userId,
+                    createdAt = System.currentTimeMillis()
+                )
+                repository.addEntry(room.id, settlementEntry)
+            } catch (e: Exception) {
+                _errorMessage.value = FirestoreErrorHandler.handle(e, "record settlement")
+            }
+        }
     }
-  }
 
-  fun deleteEntry(entryId: String) {
-    val roomId = _uiState.value.activeRoom?.id ?: return
-    viewModelScope.launch {
-      try {
-        repository.deleteEntry(roomId, entryId)
-      } catch (e: Exception) {
-        _uiState.update { it.copy(activeNotification = "Failed to delete: ${e.message}") }
-      }
+    fun updateUpiId(upiId: String) {
+        val user = _currentUserProfile.value ?: return
+        viewModelScope.launch {
+            try {
+                repository.updateUserUpiId(user.id, upiId)
+                _currentUserProfile.value = user.copy(upiId = upiId)
+                val room = _currentRoom.value
+                if (room != null) {
+                    repository.updateMemberUpi(room.id, user.id, upiId)
+                }
+            } catch (e: Exception) {
+                _errorMessage.value = FirestoreErrorHandler.handle(e, "update UPI ID")
+            }
+        }
     }
-  }
 
-  // Real Room Creation & Joining
-  fun openCreateRoom() { _uiState.update { it.copy(isCreateRoomOpen = true, isRoomDetailsOpen = false) } }
-  fun closeCreateRoom() { _uiState.update { it.copy(isCreateRoomOpen = false) } }
-
-  fun openJoinRoom() { _uiState.update { it.copy(isJoinRoomOpen = true, isRoomDetailsOpen = false) } }
-  fun closeJoinRoom() { _uiState.update { it.copy(isJoinRoomOpen = false) } }
-
-  fun openRoomDetails() { _uiState.update { it.copy(isRoomDetailsOpen = true) } }
-  fun closeRoomDetails() { _uiState.update { it.copy(isRoomDetailsOpen = false) } }
-
-  fun openProfileDialog() { _uiState.update { it.copy(isProfileDialogOpen = true) } }
-  fun closeProfileDialog() { _uiState.update { it.copy(isProfileDialogOpen = false) } }
-
-  fun dismissNotification() {
-    repository.clearNotification()
-    _uiState.update { it.copy(activeNotification = null) }
-  }
-
-  fun createRoom(name: String, emoji: String = "🏠") {
-    viewModelScope.launch {
-      try {
-        val room = repository.createRoom(name, emoji)
-        closeCreateRoom()
-        repository.emitNotification("Room '${room.name}' created! Code: ${room.inviteCode}")
-      } catch (e: Exception) {
-        _uiState.update { it.copy(activeNotification = "Error creating room: ${e.message}") }
-      }
+    fun clearActiveRoom() {
+        val user = _currentUserProfile.value ?: return
+        viewModelScope.launch {
+            try {
+                repository.updateUserActiveRoom(user.id, null)
+                clearRoomState()
+            } catch (e: Exception) {
+                _errorMessage.value = FirestoreErrorHandler.handle(e, "leave room")
+            }
+        }
     }
-  }
 
-  fun joinRoom(code: String, onResult: (Boolean, String) -> Unit) {
-    viewModelScope.launch {
-      val result = repository.joinRoomByInviteCode(code)
-      if (result.isSuccess) {
-        val room = result.getOrThrow()
-        closeJoinRoom()
-        repository.emitNotification("Joined '${room.name}'!")
-        onResult(true, "Joined ${room.name}")
-      } else {
-        val msg = result.exceptionOrNull()?.message ?: "Failed to join room"
-        onResult(false, msg)
-      }
+    fun signOut() {
+        auth.signOut()
+        cleanupState()
     }
-  }
 
-  fun updateRoomName(newName: String) {
-    val roomId = _uiState.value.activeRoom?.id ?: return
-    viewModelScope.launch {
-      try {
-        repository.updateRoomName(roomId, newName)
-        repository.emitNotification("Room renamed to $newName")
-      } catch (e: Exception) {
-        _uiState.update { it.copy(activeNotification = "Failed to rename: ${e.message}") }
-      }
+    private fun clearRoomState() {
+        roomJob?.cancel()
+        membersJob?.cancel()
+        entriesJob?.cancel()
+        _currentRoom.value = null
+        _members.value = emptyList()
+        _entries.value = emptyList()
+        _balances.value = emptyList()
+        _debtTransfers.value = emptyList()
     }
-  }
 
-  fun saveProfile(name: String, phone: String, avatarHex: String, upiId: String) {
-    viewModelScope.launch {
-      try {
-        repository.saveUserProfile(name, phone, avatarHex, upiId)
-        closeProfileDialog()
-        repository.emitNotification("Profile updated")
-      } catch (e: Exception) {
-        _uiState.update { it.copy(activeNotification = "Failed to update profile: ${e.message}") }
-      }
+    private fun cleanupState() {
+        profileJob?.cancel()
+        clearRoomState()
+        _currentUserProfile.value = null
     }
-  }
-
-  fun signOut() {
-    Firebase.auth.signOut()
-    repository.setActiveRoomId(null)
-  }
 }
